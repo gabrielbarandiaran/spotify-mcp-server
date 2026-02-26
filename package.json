@@ -1,14 +1,15 @@
 {
   "type": "module",
   "name": "@0xbarandiaran/spotify-mcp-server",
-  "version": "2.0.1",
+  "version": "2.0.2",
   "main": "build/index.js",
   "bin": {
     "spotify-mcp-server": "build/index.js",
-    "spotify-mcp": "build/index.js"
+    "spotify-mcp": "build/index.js",
+    "spotify-mcp-auth": "build/auth.js"
   },
   "scripts": {
-    "build": "tsc && node -e \"require('fs').chmodSync('build/index.js', '755')\"",
+    "build": "tsc && node -e \"require('fs').chmodSync('build/index.js', '755'); require('fs').chmodSync('build/auth.js', '755');\"",
     "auth": "tsc && node build/auth.js",
     "lint": "biome check --diagnostic-level=warn --error-on-warnings",
     "lint:fix": "biome check --write --unsafe --organize-imports-enabled=true",

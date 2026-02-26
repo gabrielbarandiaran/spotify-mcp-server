@@ -1,6 +1,7 @@
 import crypto from 'node:crypto';
 import fs from 'node:fs';
 import http from 'node:http';
+import os from 'node:os';
 import path from 'node:path';
 import { URL, fileURLToPath } from 'node:url';
 import open from 'open';
@@ -8,7 +9,31 @@ import open from 'open';
 const SPOTIFY_API_BASE = 'https://api.spotify.com/v1';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
-const CONFIG_FILE = path.join(__dirname, '../spotify-config.json');
+
+// Config file locations (in order of priority):
+// 1. ~/.spotify-mcp/config.json (user home directory - preferred for npx)
+// 2. ./spotify-config.json (current working directory - for local development)
+// 3. Package directory (legacy - for backwards compatibility)
+function getConfigFilePath(): string {
+  const homeConfig = path.join(os.homedir(), '.spotify-mcp', 'config.json');
+  const cwdConfig = path.join(process.cwd(), 'spotify-config.json');
+  const packageConfig = path.join(__dirname, '../spotify-config.json');
+
+  if (fs.existsSync(homeConfig)) {
+    return homeConfig;
+  }
+  if (fs.existsSync(cwdConfig)) {
+    return cwdConfig;
+  }
+  if (fs.existsSync(packageConfig)) {
+    return packageConfig;
+  }
+
+  // Default to home directory for new installs
+  return homeConfig;
+}
+
+const CONFIG_FILE = getConfigFilePath();
 
 export interface SpotifyConfig {
   clientId: string;
@@ -21,8 +46,15 @@ export interface SpotifyConfig {
 
 export function loadSpotifyConfig(): SpotifyConfig {
   if (!fs.existsSync(CONFIG_FILE)) {
+    const homeConfig = path.join(os.homedir(), '.spotify-mcp', 'config.json');
     throw new Error(
-      `Spotify configuration file not found at ${CONFIG_FILE}. Please create one with clientId, clientSecret, and redirectUri.`,
+      `Spotify configuration file not found. Please create ${homeConfig} with the following content:\n` +
+        '{\n' +
+        '  "clientId": "your-spotify-client-id",\n' +
+        '  "clientSecret": "your-spotify-client-secret",\n' +
+        '  "redirectUri": "http://127.0.0.1:8888/callback"\n' +
+        '}\n\n' +
+        'Then run: npx @0xbarandiaran/spotify-mcp-server auth',
     );
   }
 
@@ -44,6 +76,10 @@ export function loadSpotifyConfig(): SpotifyConfig {
 }
 
 export function saveSpotifyConfig(config: SpotifyConfig): void {
+  const configDir = path.dirname(CONFIG_FILE);
+  if (!fs.existsSync(configDir)) {
+    fs.mkdirSync(configDir, { recursive: true });
+  }
   fs.writeFileSync(CONFIG_FILE, JSON.stringify(config, null, 2), 'utf8');
 }
 

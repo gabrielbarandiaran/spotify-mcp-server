@@ -5,11 +5,12 @@
 
 A lightweight [Model Context Protocol (MCP)](https://modelcontextprotocol.io) server that enables AI assistants like Cursor & Claude to control Spotify playback and manage playlists.
 
-> **Note**: This version (2.0.0) has been updated to comply with [Spotify's February 2026 API migration](https://developer.spotify.com/documentation/web-api/tutorials/february-2026-migration-guide). The server now uses direct HTTP calls to the new Spotify API endpoints instead of the deprecated SDK.
+> **Note**: This version (2.0.x) has been updated to comply with [Spotify's February 2026 API migration](https://developer.spotify.com/documentation/web-api/tutorials/february-2026-migration-guide). The server now uses direct HTTP calls to the new Spotify API endpoints instead of the deprecated SDK.
 
 <details>
 <summary>Contents</summary>
 
+- [Quick Start](#quick-start)
 - [Example Interactions](#example-interactions)
 - [Tools](#tools)
   - [Read Operations](#read-operations)
@@ -17,12 +18,32 @@ A lightweight [Model Context Protocol (MCP)](https://modelcontextprotocol.io) se
   - [Play / Create Operations](#play--create-operations)
 - [Setup](#setup)
   - [Prerequisites](#prerequisites)
-  - [Installation](#installation)
   - [Creating a Spotify Developer Application](#creating-a-spotify-developer-application)
-  - [Spotify API Configuration](#spotify-api-configuration)
-  - [Authentication Process](#authentication-process)
-- [Integrating with Claude Desktop, Cursor, and VsCode (Cline)](#integrating-with-claude-desktop-and-cursor)
+  - [Configuration](#configuration)
+  - [Authentication](#authentication)
+- [Integrating with Claude Desktop, Cursor, and VsCode (Cline)](#integrating-with-claude-desktop-cursor-and-vscode-cline)
 </details>
+
+## Quick Start
+
+```bash
+# 1. Create config directory and file
+mkdir -p ~/.spotify-mcp
+cat > ~/.spotify-mcp/config.json << 'EOF'
+{
+  "clientId": "YOUR_SPOTIFY_CLIENT_ID",
+  "clientSecret": "YOUR_SPOTIFY_CLIENT_SECRET",
+  "redirectUri": "http://127.0.0.1:8888/callback"
+}
+EOF
+
+# 2. Authenticate with Spotify (opens browser)
+npx @0xbarandiaran/spotify-mcp-server auth
+
+# 3. Add to your Claude/Cursor config and restart
+```
+
+See [Creating a Spotify Developer Application](#creating-a-spotify-developer-application) to get your Client ID and Secret.
 
 ## Example Interactions
 
@@ -249,23 +270,6 @@ A lightweight [Model Context Protocol (MCP)](https://modelcontextprotocol.io) se
 
 > **Important**: As of February 2026, Spotify requires the app owner to maintain an active Spotify Premium subscription for Development Mode apps. The app will stop functioning if the Premium subscription lapses.
 
-### Installation
-
-#### Option 1: Install from npm (Recommended)
-
-```bash
-npm install -g @0xbarandiaran/spotify-mcp-server
-```
-
-#### Option 2: Clone and build from source
-
-```bash
-git clone https://github.com/marcelmarais/spotify-mcp-server.git
-cd spotify-mcp-server
-npm install
-npm run build
-```
-
 ### Creating a Spotify Developer Application
 
 1. Go to the [Spotify Developer Dashboard](https://developer.spotify.com/dashboard/)
@@ -275,72 +279,74 @@ npm run build
 5. Accept the Terms of Service and click "Create"
 6. In your new app's dashboard, you'll see your **Client ID**
 7. Click "Show Client Secret" to reveal your **Client Secret**
-8. Click "Edit Settings" and add a Redirect URI (e.g., `http://127.0.0.1:8888/callback`)
+8. Click "Edit Settings" and add a Redirect URI: `http://127.0.0.1:8888/callback`
 9. Save your changes
 
-### Spotify API Configuration
+### Configuration
 
-Create a `spotify-config.json` file in the project root (you can copy and modify the provided example):
+The server looks for configuration in these locations (in order):
+
+1. `~/.spotify-mcp/config.json` (recommended for npx users)
+2. `./spotify-config.json` (current directory, for local development)
+
+Create your config file:
 
 ```bash
-# Copy the example config file
-cp spotify-config.example.json spotify-config.json
-```
+# Create the config directory
+mkdir -p ~/.spotify-mcp
 
-Then edit the file with your credentials:
-
-```json
+# Create the config file
+cat > ~/.spotify-mcp/config.json << 'EOF'
 {
   "clientId": "your-client-id",
   "clientSecret": "your-client-secret",
   "redirectUri": "http://127.0.0.1:8888/callback"
 }
+EOF
 ```
 
-### Authentication Process
+Or if you prefer, edit `~/.spotify-mcp/config.json` manually with your favorite editor.
 
-The Spotify API uses OAuth 2.0 for authentication. Follow these steps to authenticate your application:
+### Authentication
 
-1. Run the authentication script:
+The Spotify API uses OAuth 2.0 for authentication. Run the authentication command:
 
 ```bash
+# Using npx (recommended)
+npx @0xbarandiaran/spotify-mcp-server auth
+
+# Or if cloned locally
 npm run auth
 ```
 
-2. The script will generate an authorization URL. Open this URL in your web browser.
+This will:
+1. Open your browser to Spotify's authorization page
+2. After you approve, capture the authorization code
+3. Exchange it for access and refresh tokens
+4. Save the tokens to your config file
 
-3. You'll be prompted to log in to Spotify and authorize your application.
-
-4. After authorization, Spotify will redirect you to your specified redirect URI with a code parameter in the URL.
-
-5. The authentication script will automatically exchange this code for access and refresh tokens.
-
-6. These tokens will be saved to your `spotify-config.json` file, which will now look something like:
+Your config file will now include the tokens:
 
 ```json
 {
   "clientId": "your-client-id",
   "clientSecret": "your-client-secret",
-  "redirectUri": "http://localhost:8888/callback",
+  "redirectUri": "http://127.0.0.1:8888/callback",
   "accessToken": "BQAi9Pn...kKQ",
   "refreshToken": "AQDQcj...7w",
   "expiresAt": 1677889354671
 }
 ```
 
-**Note**: The `expiresAt` field is a Unix timestamp (in milliseconds) indicating when the access token expires.
+**Automatic Token Refresh**: The server automatically refreshes the access token when it expires (typically after 1 hour). If refresh fails, run the auth command again.
 
-7. **Automatic Token Refresh**: The server will automatically refresh the access token when it expires (typically after 1 hour). The refresh happens transparently using the `refreshToken`, so you don't need to re-authenticate manually. If the refresh fails, you'll need to run `npm run auth` again to re-authenticate.
-
-## Integrating with Claude Desktop, Cursor, and VsCode [Via Cline model extension](https://marketplace.visualstudio.com/items/?itemName=saoudrizwan.claude-dev)
+## Integrating with Claude Desktop, Cursor, and VsCode (Cline)
 
 ### Claude Desktop / Claude Code
 
-Add the following to your Claude configuration file:
+Add to your Claude configuration file:
 - **macOS**: `~/Library/Application Support/Claude/claude_desktop_config.json`
 - **Windows**: `%APPDATA%\Claude\claude_desktop_config.json`
-
-#### If installed globally via npm:
 
 ```json
 {
@@ -353,18 +359,7 @@ Add the following to your Claude configuration file:
 }
 ```
 
-#### If cloned and built from source:
-
-```json
-{
-  "mcpServers": {
-    "spotify": {
-      "command": "node",
-      "args": ["/absolute/path/to/spotify-mcp-server/build/index.js"]
-    }
-  }
-}
-```
+Then restart Claude Desktop.
 
 ### Cursor
 
@@ -374,15 +369,9 @@ Go to the MCP tab in `Cursor Settings` (command + shift + J). Add a server with 
 npx -y @0xbarandiaran/spotify-mcp-server
 ```
 
-Or if using from source:
-
-```bash
-node /path/to/spotify-mcp-server/build/index.js
-```
-
 ### Cline (VS Code Extension)
 
-Ensure you have the following file configuration set in `cline_mcp_settings.json`:
+Add to your `cline_mcp_settings.json`:
 
 ```json
 {
@@ -396,4 +385,27 @@ Ensure you have the following file configuration set in `cline_mcp_settings.json
 }
 ```
 
-You can add additional tools to the auto approval array to run the tools without intervention.
+## Development
+
+### Building from source
+
+```bash
+git clone https://github.com/gabrielbarandiaran/spotify-mcp-server.git
+cd spotify-mcp-server
+npm install
+npm run build
+```
+
+### Running locally
+
+```bash
+# Run the MCP server
+node build/index.js
+
+# Run authentication
+node build/auth.js
+```
+
+## License
+
+MIT

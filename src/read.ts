@@ -37,7 +37,10 @@ interface SpotifyPlaylistsResponse {
 }
 
 interface SpotifyPlaylistItemsResponse {
-  items: Array<{ track: SpotifyTrack | null }>;
+  items: Array<{
+    track?: SpotifyTrack | null;
+    item?: SpotifyTrack | null;
+  }>;
   total: number;
 }
 
@@ -337,16 +340,10 @@ const getPlaylistTracks: tool<{
     const { playlistId, limit = 50, offset = 0 } = args;
 
     // Using new /items endpoint instead of deprecated /tracks
-    // Request specific fields to ensure we get track details
     const playlistTracks = await spotifyFetch<SpotifyPlaylistItemsResponse>(
       `/playlists/${playlistId}/items`,
       {
-        params: {
-          limit,
-          offset,
-          fields:
-            'total,items(track(id,name,duration_ms,type,artists(name),album(name)))',
-        },
+        params: { limit, offset },
       },
     );
 
@@ -362,8 +359,9 @@ const getPlaylistTracks: tool<{
     }
 
     const formattedTracks = playlistTracks.items
-      .map((item, i) => {
-        const { track } = item;
+      .map((playlistItem, i) => {
+        // New API uses "item" field, old API used "track" field
+        const track = playlistItem.item || playlistItem.track;
         if (!track) return `${offset + i + 1}. [Removed track]`;
 
         if (isTrack(track)) {

@@ -1,7 +1,70 @@
-import type { MaxInt } from '@spotify/web-api-ts-sdk';
 import { z } from 'zod';
 import type { SpotifyHandlerExtra, SpotifyTrack, tool } from './types.js';
-import { formatDuration, handleSpotifyRequest } from './utils.js';
+import { formatDuration, spotifyFetch } from './utils.js';
+
+// Spotify API response types
+interface SpotifySearchResponse {
+  tracks?: { items: SpotifyTrack[] };
+  albums?: {
+    items: Array<{
+      id: string;
+      name: string;
+      artists: Array<{ name: string }>;
+    }>;
+  };
+  artists?: { items: Array<{ id: string; name: string }> };
+  playlists?: {
+    items: Array<{
+      id: string;
+      name: string;
+      description: string;
+      owner: { display_name: string };
+    } | null>;
+  };
+}
+
+interface SpotifyPlaybackState {
+  item: SpotifyTrack | null;
+  progress_ms: number | null;
+  is_playing: boolean;
+  device: { name: string; type: string; volume_percent: number | null } | null;
+  shuffle_state: boolean;
+  repeat_state: string;
+}
+
+interface SpotifyPlaylistsResponse {
+  items: Array<{ id: string; name: string; tracks?: { total: number } }>;
+}
+
+interface SpotifyPlaylistItemsResponse {
+  items: Array<{ track: SpotifyTrack | null }>;
+  total: number;
+}
+
+interface SpotifyRecentlyPlayedResponse {
+  items: Array<{ track: SpotifyTrack; played_at: string }>;
+}
+
+interface SpotifySavedTracksResponse {
+  items: Array<{ track: SpotifyTrack; added_at: string }>;
+  total: number;
+}
+
+interface SpotifyQueueResponse {
+  currently_playing: SpotifyTrack | null;
+  queue: SpotifyTrack[];
+}
+
+interface SpotifyDevicesResponse {
+  devices: Array<{
+    id: string;
+    name: string;
+    type: string;
+    is_active: boolean;
+    is_restricted: boolean;
+    volume_percent: number | null;
+  }>;
+}
 
 function isTrack(item: any): item is SpotifyTrack {
   return (
@@ -30,22 +93,24 @@ const searchSpotify: tool<{
     limit: z
       .number()
       .min(1)
-      .max(50)
+      .max(10)
       .optional()
-      .describe('Maximum number of results to return (10-50)'),
+      .describe(
+        'Maximum number of results to return (1-10, max 10 due to API limits)',
+      ),
   },
   handler: async (args, _extra: SpotifyHandlerExtra) => {
     const { query, type, limit } = args;
-    const limitValue = limit ?? 10;
+    // Cap limit at 10 due to Spotify API restrictions for Dev Mode apps
+    const limitValue = Math.min(limit ?? 10, 10);
 
     try {
-      const results = await handleSpotifyRequest(async (spotifyApi) => {
-        return await spotifyApi.search(
-          query,
-          [type],
-          undefined,
-          limitValue as MaxInt<50>,
-        );
+      const results = await spotifyFetch<SpotifySearchResponse>('/search', {
+        params: {
+          q: query,
+          type: type,
+          limit: limitValue,
+        },
       });
 
       let formattedResults = '';
@@ -118,9 +183,7 @@ const getNowPlaying: tool<Record<string, never>> = {
   schema: {},
   handler: async (_args, _extra: SpotifyHandlerExtra) => {
     try {
-      const playback = await handleSpotifyRequest(async (spotifyApi) => {
-        return await spotifyApi.player.getPlaybackState();
-      });
+      const playback = await spotifyFetch<SpotifyPlaybackState>('/me/player');
 
       if (!playback?.item) {
         return {
@@ -211,11 +274,12 @@ const getMyPlaylists: tool<{
   handler: async (args, _extra: SpotifyHandlerExtra) => {
     const { limit = 50 } = args;
 
-    const playlists = await handleSpotifyRequest(async (spotifyApi) => {
-      return await spotifyApi.currentUser.playlists.playlists(
-        limit as MaxInt<50>,
-      );
-    });
+    const playlists = await spotifyFetch<SpotifyPlaylistsResponse>(
+      '/me/playlists',
+      {
+        params: { limit },
+      },
+    );
 
     if (playlists.items.length === 0) {
       return {
@@ -272,15 +336,13 @@ const getPlaylistTracks: tool<{
   handler: async (args, _extra: SpotifyHandlerExtra) => {
     const { playlistId, limit = 50, offset = 0 } = args;
 
-    const playlistTracks = await handleSpotifyRequest(async (spotifyApi) => {
-      return await spotifyApi.playlists.getPlaylistItems(
-        playlistId,
-        undefined,
-        undefined,
-        limit as MaxInt<50>,
-        offset,
-      );
-    });
+    // Using new /items endpoint instead of deprecated /tracks
+    const playlistTracks = await spotifyFetch<SpotifyPlaylistItemsResponse>(
+      `/playlists/${playlistId}/items`,
+      {
+        params: { limit, offset },
+      },
+    );
 
     if ((playlistTracks.items?.length ?? 0) === 0) {
       return {
@@ -335,11 +397,12 @@ const getRecentlyPlayed: tool<{
   handler: async (args, _extra: SpotifyHandlerExtra) => {
     const { limit = 50 } = args;
 
-    const history = await handleSpotifyRequest(async (spotifyApi) => {
-      return await spotifyApi.player.getRecentlyPlayedTracks(
-        limit as MaxInt<50>,
-      );
-    });
+    const history = await spotifyFetch<SpotifyRecentlyPlayedResponse>(
+      '/me/player/recently-played',
+      {
+        params: { limit },
+      },
+    );
 
     if (history.items.length === 0) {
       return {
@@ -404,12 +467,12 @@ const getUsersSavedTracks: tool<{
   handler: async (args, _extra: SpotifyHandlerExtra) => {
     const { limit = 50, offset = 0 } = args;
 
-    const savedTracks = await handleSpotifyRequest(async (spotifyApi) => {
-      return await spotifyApi.currentUser.tracks.savedTracks(
-        limit as MaxInt<50>,
-        offset,
-      );
-    });
+    const savedTracks = await spotifyFetch<SpotifySavedTracksResponse>(
+      '/me/tracks',
+      {
+        params: { limit, offset },
+      },
+    );
 
     if (savedTracks.items.length === 0) {
       return {
@@ -467,12 +530,11 @@ const getQueue: tool<{
     const { limit = 10 } = args;
 
     try {
-      const queue = await handleSpotifyRequest(async (spotifyApi) => {
-        return await spotifyApi.player.getUsersQueue();
-      });
+      const queue =
+        await spotifyFetch<SpotifyQueueResponse>('/me/player/queue');
 
-      const current = (queue as any)?.currently_playing;
-      const upcoming = ((queue as any)?.queue ?? []) as any[];
+      const current = queue?.currently_playing;
+      const upcoming = queue?.queue ?? [];
 
       const header = '# Spotify Queue\n\n';
 
@@ -480,9 +542,7 @@ const getQueue: tool<{
       if (current) {
         const name = current?.name ?? 'Unknown';
         const artists = Array.isArray(current?.artists)
-          ? (current.artists as Array<{ name: string }>)
-              .map((a) => a.name)
-              .join(', ')
+          ? current.artists.map((a) => a.name).join(', ')
           : 'Unknown';
         const duration =
           typeof current?.duration_ms === 'number'
@@ -507,9 +567,7 @@ const getQueue: tool<{
         .map((track, i) => {
           const name = track?.name ?? 'Unknown';
           const artists = Array.isArray(track?.artists)
-            ? (track.artists as Array<{ name: string }>)
-                .map((a) => a.name)
-                .join(', ')
+            ? track.artists.map((a) => a.name).join(', ')
             : 'Unknown';
           const duration =
             typeof track?.duration_ms === 'number'
@@ -550,9 +608,8 @@ const getAvailableDevices: tool<Record<string, never>> = {
   schema: {},
   handler: async (_args, _extra: SpotifyHandlerExtra) => {
     try {
-      const devices = await handleSpotifyRequest(async (spotifyApi) => {
-        return await spotifyApi.player.getAvailableDevices();
-      });
+      const devices =
+        await spotifyFetch<SpotifyDevicesResponse>('/me/player/devices');
 
       if (!devices.devices || devices.devices.length === 0) {
         return {

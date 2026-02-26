@@ -3,8 +3,9 @@ import fs from 'node:fs';
 import http from 'node:http';
 import path from 'node:path';
 import { URL, fileURLToPath } from 'node:url';
-import { SpotifyApi } from '@spotify/web-api-ts-sdk';
 import open from 'open';
+
+const SPOTIFY_API_BASE = 'https://api.spotify.com/v1';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const CONFIG_FILE = path.join(__dirname, '../spotify-config.json');
@@ -46,9 +47,9 @@ export function saveSpotifyConfig(config: SpotifyConfig): void {
   fs.writeFileSync(CONFIG_FILE, JSON.stringify(config, null, 2), 'utf8');
 }
 
-let cachedSpotifyApi: SpotifyApi | null = null;
+let cachedAccessToken: string | null = null;
 
-export async function createSpotifyApi(): Promise<SpotifyApi> {
+export async function getAccessToken(): Promise<string> {
   const config = loadSpotifyConfig();
 
   if (config.accessToken && config.refreshToken) {
@@ -66,8 +67,8 @@ export async function createSpotifyApi(): Promise<SpotifyApi> {
         saveSpotifyConfig(config);
         console.log('Access token refreshed successfully');
 
-        // Clear cached API instance to force recreation with new token
-        cachedSpotifyApi = null;
+        // Clear cached token to force refresh
+        cachedAccessToken = null;
       } catch (error) {
         console.error('Failed to refresh token:', error);
         throw new Error(
@@ -76,30 +77,74 @@ export async function createSpotifyApi(): Promise<SpotifyApi> {
       }
     }
 
-    if (cachedSpotifyApi) {
-      return cachedSpotifyApi;
-    }
-
-    const accessToken = {
-      access_token: config.accessToken,
-      token_type: 'Bearer',
-      expires_in: Math.floor(
-        ((config.expiresAt ?? now + 3600000) - now) / 1000,
-      ),
-      refresh_token: config.refreshToken,
-    };
-
-    cachedSpotifyApi = SpotifyApi.withAccessToken(config.clientId, accessToken);
-    return cachedSpotifyApi;
+    cachedAccessToken = config.accessToken;
+    return cachedAccessToken;
   }
 
-  // Fallback to client credentials if no user tokens available
-  cachedSpotifyApi = SpotifyApi.withClientCredentials(
-    config.clientId,
-    config.clientSecret,
+  throw new Error(
+    'No access token available. Please run "npm run auth" to authenticate.',
   );
+}
 
-  return cachedSpotifyApi;
+export interface SpotifyFetchOptions {
+  method?: 'GET' | 'POST' | 'PUT' | 'DELETE';
+  body?: Record<string, unknown>;
+  params?: Record<string, string | number | undefined>;
+}
+
+export async function spotifyFetch<T>(
+  endpoint: string,
+  options: SpotifyFetchOptions = {},
+): Promise<T> {
+  const { method = 'GET', body, params } = options;
+  const accessToken = await getAccessToken();
+
+  let url = `${SPOTIFY_API_BASE}${endpoint}`;
+
+  if (params) {
+    const searchParams = new URLSearchParams();
+    for (const [key, value] of Object.entries(params)) {
+      if (value !== undefined) {
+        searchParams.append(key, String(value));
+      }
+    }
+    const queryString = searchParams.toString();
+    if (queryString) {
+      url += `?${queryString}`;
+    }
+  }
+
+  const headers: Record<string, string> = {
+    Authorization: `Bearer ${accessToken}`,
+  };
+
+  if (body) {
+    headers['Content-Type'] = 'application/json';
+  }
+
+  const response = await fetch(url, {
+    method,
+    headers,
+    body: body ? JSON.stringify(body) : undefined,
+  });
+
+  if (!response.ok) {
+    const errorText = await response.text();
+    throw new Error(`Spotify API error (${response.status}): ${errorText}`);
+  }
+
+  // Handle empty responses (204 No Content, etc.)
+  const text = await response.text();
+  if (!text) {
+    return undefined as T;
+  }
+
+  try {
+    return JSON.parse(text) as T;
+  } catch {
+    // Some endpoints return non-JSON responses
+    return undefined as T;
+  }
 }
 
 function generateRandomString(length: number): string {
@@ -348,12 +393,13 @@ export function formatDuration(ms: number): string {
   return `${minutes}:${seconds.padStart(2, '0')}`;
 }
 
+// This function is kept for backwards compatibility during migration
+// but can be removed once all tools are updated to use spotifyFetch directly
 export async function handleSpotifyRequest<T>(
-  action: (spotifyApi: SpotifyApi) => Promise<T>,
+  action: () => Promise<T>,
 ): Promise<T> {
   try {
-    const spotifyApi = await createSpotifyApi();
-    return await action(spotifyApi);
+    return await action();
   } catch (error) {
     // Skip JSON parsing errors as these are actually successful operations
     const errorMessage = error instanceof Error ? error.message : String(error);

@@ -1,25 +1,47 @@
 {
   "type": "module",
-  "name": "spotify-mcp-server",
-  "version": "1.0.0",
-  "main": "index.js",
+  "name": "@0xbarandiaran/spotify-mcp-server",
+  "version": "2.0.0",
+  "main": "build/index.js",
   "bin": {
-    "spotify-mcp": "./build/index.js"
+    "spotify-mcp-server": "build/index.js",
+    "spotify-mcp": "build/index.js"
   },
   "scripts": {
     "build": "tsc && node -e \"require('fs').chmodSync('build/index.js', '755')\"",
     "auth": "tsc && node build/auth.js",
     "lint": "biome check --diagnostic-level=warn --error-on-warnings",
     "lint:fix": "biome check --write --unsafe --organize-imports-enabled=true",
-    "typecheck": "tsc --noEmit"
+    "typecheck": "tsc --noEmit",
+    "prepublishOnly": "npm run build"
   },
-  "files": ["build"],
-  "keywords": [],
+  "files": ["build", "spotify-config.example.json"],
+  "keywords": [
+    "spotify",
+    "mcp",
+    "model-context-protocol",
+    "claude",
+    "ai",
+    "music",
+    "playback",
+    "playlist"
+  ],
   "author": "Marcel Marais",
-  "description": "A Model Context Protocol server for Spotify integration",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/marcelmarais/spotify-mcp-server.git"
+  },
+  "bugs": {
+    "url": "https://github.com/marcelmarais/spotify-mcp-server/issues"
+  },
+  "homepage": "https://github.com/marcelmarais/spotify-mcp-server#readme",
+  "engines": {
+    "node": ">=18.0.0"
+  },
+  "description": "A Model Context Protocol server for Spotify integration - Updated for Spotify's February 2026 API migration",
   "dependencies": {
     "@modelcontextprotocol/sdk": "^1.10.1",
-    "@spotify/web-api-ts-sdk": "^1.2.0",
     "open": "^10.1.0",
     "zod": "^3.24.2"
   },

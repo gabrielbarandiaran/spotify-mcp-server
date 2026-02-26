@@ -5,6 +5,8 @@
 
 A lightweight [Model Context Protocol (MCP)](https://modelcontextprotocol.io) server that enables AI assistants like Cursor & Claude to control Spotify playback and manage playlists.
 
+> **Note**: This version (2.0.0) has been updated to comply with [Spotify's February 2026 API migration](https://developer.spotify.com/documentation/web-api/tutorials/february-2026-migration-guide). The server now uses direct HTTP calls to the new Spotify API endpoints instead of the deprecated SDK.
+
 <details>
 <summary>Contents</summary>
 
@@ -39,9 +41,9 @@ A lightweight [Model Context Protocol (MCP)](https://modelcontextprotocol.io) se
    - **Parameters**:
      - `query` (string): The search term
      - `type` (string): Type of item to search for (track, album, artist, playlist)
-     - `limit` (number, optional): Maximum number of results to return (10-50)
+     - `limit` (number, optional): Maximum number of results to return (1-10, max 10 due to API limits)
    - **Returns**: List of matching items with their IDs, names, and additional details
-   - **Example**: `searchSpotify("bohemian rhapsody", "track", 20)`
+   - **Example**: `searchSpotify("bohemian rhapsody", "track", 10)`
 
 2. **getNowPlaying**
 
@@ -241,11 +243,21 @@ A lightweight [Model Context Protocol (MCP)](https://modelcontextprotocol.io) se
 
 ### Prerequisites
 
-- Node.js v16+
-- A Spotify Premium account
+- Node.js v18+
+- A Spotify Premium account (required for the app owner due to [Spotify API changes](https://developer.spotify.com/documentation/web-api/tutorials/february-2026-migration-guide))
 - A registered Spotify Developer application
 
+> **Important**: As of February 2026, Spotify requires the app owner to maintain an active Spotify Premium subscription for Development Mode apps. The app will stop functioning if the Premium subscription lapses.
+
 ### Installation
+
+#### Option 1: Install from npm (Recommended)
+
+```bash
+npm install -g @0xbarandiaran/spotify-mcp-server
+```
+
+#### Option 2: Clone and build from source
 
 ```bash
 git clone https://github.com/marcelmarais/spotify-mcp-server.git
@@ -322,34 +334,63 @@ npm run auth
 
 ## Integrating with Claude Desktop, Cursor, and VsCode [Via Cline model extension](https://marketplace.visualstudio.com/items/?itemName=saoudrizwan.claude-dev)
 
-To use your MCP server with Claude Desktop, add it to your Claude configuration:
+### Claude Desktop / Claude Code
+
+Add the following to your Claude configuration file:
+- **macOS**: `~/Library/Application Support/Claude/claude_desktop_config.json`
+- **Windows**: `%APPDATA%\Claude\claude_desktop_config.json`
+
+#### If installed globally via npm:
 
 ```json
 {
   "mcpServers": {
     "spotify": {
-      "command": "node",
-      "args": ["spotify-mcp-server/build/index.js"]
+      "command": "npx",
+      "args": ["-y", "@0xbarandiaran/spotify-mcp-server"]
     }
   }
 }
 ```
 
-For Cursor, go to the MCP tab in `Cursor Settings` (command + shift + J). Add a server with this command:
-
-```bash
-node path/to/spotify-mcp-server/build/index.js
-```
-
-To set up your MCP correctly with Cline ensure you have the following file configuration set `cline_mcp_settings.json`:
+#### If cloned and built from source:
 
 ```json
 {
   "mcpServers": {
     "spotify": {
       "command": "node",
-      "args": ["~/../spotify-mcp-server/build/index.js"],
-      "autoApprove": ["getListeningHistory", "getNowPlaying"]
+      "args": ["/absolute/path/to/spotify-mcp-server/build/index.js"]
+    }
+  }
+}
+```
+
+### Cursor
+
+Go to the MCP tab in `Cursor Settings` (command + shift + J). Add a server with this command:
+
+```bash
+npx -y @0xbarandiaran/spotify-mcp-server
+```
+
+Or if using from source:
+
+```bash
+node /path/to/spotify-mcp-server/build/index.js
+```
+
+### Cline (VS Code Extension)
+
+Ensure you have the following file configuration set in `cline_mcp_settings.json`:
+
+```json
+{
+  "mcpServers": {
+    "spotify": {
+      "command": "npx",
+      "args": ["-y", "@0xbarandiaran/spotify-mcp-server"],
+      "autoApprove": ["getNowPlaying", "getMyPlaylists", "searchSpotify"]
     }
   }
 }

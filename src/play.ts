@@ -1,6 +1,16 @@
 import { z } from 'zod';
 import type { SpotifyHandlerExtra, tool } from './types.js';
-import { handleSpotifyRequest } from './utils.js';
+import { spotifyFetch } from './utils.js';
+
+// Spotify API response types
+interface SpotifyPlaylistResponse {
+  id: string;
+  external_urls: { spotify: string };
+}
+
+interface SpotifyPlaybackState {
+  device: { volume_percent: number | null } | null;
+}
 
 const playMusic: tool<{
   uri: z.ZodOptional<z.ZodString>;
@@ -45,21 +55,19 @@ const playMusic: tool<{
       spotifyUri = `spotify:${type}:${id}`;
     }
 
-    await handleSpotifyRequest(async (spotifyApi) => {
-      const device = deviceId || '';
-
-      if (!spotifyUri) {
-        await spotifyApi.player.startResumePlayback(device);
-        return;
-      }
-
+    const body: Record<string, unknown> = {};
+    if (spotifyUri) {
       if (type === 'track') {
-        await spotifyApi.player.startResumePlayback(device, undefined, [
-          spotifyUri,
-        ]);
+        body.uris = [spotifyUri];
       } else {
-        await spotifyApi.player.startResumePlayback(device, spotifyUri);
+        body.context_uri = spotifyUri;
       }
+    }
+
+    await spotifyFetch('/me/player/play', {
+      method: 'PUT',
+      params: deviceId ? { device_id: deviceId } : undefined,
+      body: Object.keys(body).length > 0 ? body : undefined,
     });
 
     return {
@@ -87,8 +95,9 @@ const pausePlayback: tool<{
   handler: async (args, _extra: SpotifyHandlerExtra) => {
     const { deviceId } = args;
 
-    await handleSpotifyRequest(async (spotifyApi) => {
-      await spotifyApi.player.pausePlayback(deviceId || '');
+    await spotifyFetch('/me/player/pause', {
+      method: 'PUT',
+      params: deviceId ? { device_id: deviceId } : undefined,
     });
 
     return {
@@ -116,8 +125,9 @@ const skipToNext: tool<{
   handler: async (args, _extra: SpotifyHandlerExtra) => {
     const { deviceId } = args;
 
-    await handleSpotifyRequest(async (spotifyApi) => {
-      await spotifyApi.player.skipToNext(deviceId || '');
+    await spotifyFetch('/me/player/next', {
+      method: 'POST',
+      params: deviceId ? { device_id: deviceId } : undefined,
     });
 
     return {
@@ -146,8 +156,9 @@ const skipToPrevious: tool<{
   handler: async (args, _extra: SpotifyHandlerExtra) => {
     const { deviceId } = args;
 
-    await handleSpotifyRequest(async (spotifyApi) => {
-      await spotifyApi.player.skipToPrevious(deviceId || '');
+    await spotifyFetch('/me/player/previous', {
+      method: 'POST',
+      params: deviceId ? { device_id: deviceId } : undefined,
     });
 
     return {
@@ -182,15 +193,18 @@ const createPlaylist: tool<{
   handler: async (args, _extra: SpotifyHandlerExtra) => {
     const { name, description, public: isPublic = false } = args;
 
-    const result = await handleSpotifyRequest(async (spotifyApi) => {
-      const me = await spotifyApi.currentUser.profile();
-
-      return await spotifyApi.playlists.createPlaylist(me.id, {
-        name,
-        description,
-        public: isPublic,
-      });
-    });
+    // Using new /me/playlists endpoint instead of deprecated /users/{user_id}/playlists
+    const result = await spotifyFetch<SpotifyPlaylistResponse>(
+      '/me/playlists',
+      {
+        method: 'POST',
+        body: {
+          name,
+          description,
+          public: isPublic,
+        },
+      },
+    );
 
     return {
       content: [
@@ -234,14 +248,15 @@ const addTracksToPlaylist: tool<{
     }
 
     try {
-      const trackUris = trackIds.map((id) => `spotify:track:${id}`);
+      const trackUris = trackIds.map((id: string) => `spotify:track:${id}`);
 
-      await handleSpotifyRequest(async (spotifyApi) => {
-        await spotifyApi.playlists.addItemsToPlaylist(
-          playlistId,
-          trackUris,
+      // Using new /items endpoint instead of deprecated /tracks
+      await spotifyFetch(`/playlists/${playlistId}/items`, {
+        method: 'POST',
+        body: {
+          uris: trackUris,
           position,
-        );
+        },
       });
 
       return {
@@ -283,8 +298,9 @@ const resumePlayback: tool<{
   handler: async (args, _extra: SpotifyHandlerExtra) => {
     const { deviceId } = args;
 
-    await handleSpotifyRequest(async (spotifyApi) => {
-      await spotifyApi.player.startResumePlayback(deviceId || '');
+    await spotifyFetch('/me/player/play', {
+      method: 'PUT',
+      params: deviceId ? { device_id: deviceId } : undefined,
     });
 
     return {
@@ -341,11 +357,12 @@ const addToQueue: tool<{
       };
     }
 
-    await handleSpotifyRequest(async (spotifyApi) => {
-      await spotifyApi.player.addItemToPlaybackQueue(
-        spotifyUri,
-        deviceId || '',
-      );
+    await spotifyFetch('/me/player/queue', {
+      method: 'POST',
+      params: {
+        uri: spotifyUri,
+        ...(deviceId ? { device_id: deviceId } : {}),
+      },
     });
 
     return {
@@ -381,11 +398,12 @@ const setVolume: tool<{
     const { volumePercent, deviceId } = args;
 
     try {
-      await handleSpotifyRequest(async (spotifyApi) => {
-        await spotifyApi.player.setPlaybackVolume(
-          Math.round(volumePercent),
-          deviceId || '',
-        );
+      await spotifyFetch('/me/player/volume', {
+        method: 'PUT',
+        params: {
+          volume_percent: Math.round(volumePercent),
+          ...(deviceId ? { device_id: deviceId } : {}),
+        },
       });
 
       return {
@@ -436,9 +454,7 @@ const adjustVolume: tool<{
 
     try {
       // First get the current playback state to find current volume
-      const playback = await handleSpotifyRequest(async (spotifyApi) => {
-        return await spotifyApi.player.getPlaybackState();
-      });
+      const playback = await spotifyFetch<SpotifyPlaybackState>('/me/player');
 
       if (!playback?.device) {
         return {
@@ -465,11 +481,12 @@ const adjustVolume: tool<{
 
       const newVolume = Math.min(100, Math.max(0, currentVolume + adjustment));
 
-      await handleSpotifyRequest(async (spotifyApi) => {
-        await spotifyApi.player.setPlaybackVolume(
-          Math.round(newVolume),
-          deviceId || '',
-        );
+      await spotifyFetch('/me/player/volume', {
+        method: 'PUT',
+        params: {
+          volume_percent: Math.round(newVolume),
+          ...(deviceId ? { device_id: deviceId } : {}),
+        },
       });
 
       const direction = adjustment > 0 ? 'increased' : 'decreased';

@@ -1,7 +1,30 @@
-import type { MaxInt } from '@spotify/web-api-ts-sdk';
 import { z } from 'zod';
 import type { SpotifyHandlerExtra, tool } from './types.js';
-import { formatDuration, handleSpotifyRequest } from './utils.js';
+import { formatDuration, spotifyFetch } from './utils.js';
+
+// Spotify API response types
+interface SpotifyAlbumArtist {
+  name: string;
+}
+
+interface SpotifyAlbum {
+  id: string;
+  name: string;
+  artists: SpotifyAlbumArtist[];
+  release_date: string;
+  album_type: string;
+  total_tracks: number;
+}
+
+interface SpotifyAlbumTracksResponse {
+  items: Array<{
+    id: string;
+    name: string;
+    artists: SpotifyAlbumArtist[];
+    duration_ms: number;
+  }>;
+  total: number;
+}
 
 const getAlbums: tool<{
   albumIds: z.ZodUnion<[z.ZodString, z.ZodArray<z.ZodString>]>;
@@ -30,13 +53,20 @@ const getAlbums: tool<{
     }
 
     try {
-      const albums = await handleSpotifyRequest(async (spotifyApi) => {
-        return ids.length === 1
-          ? [await spotifyApi.albums.get(ids[0])]
-          : await spotifyApi.albums.get(ids);
-      });
+      // Batch endpoints removed - fetch albums individually
+      const albums: (SpotifyAlbum | null)[] = await Promise.all(
+        ids.map(async (id) => {
+          try {
+            return await spotifyFetch<SpotifyAlbum>(`/albums/${id}`);
+          } catch {
+            return null;
+          }
+        }),
+      );
 
-      if (albums.length === 0) {
+      const validAlbums = albums.filter((a): a is SpotifyAlbum => a !== null);
+
+      if (validAlbums.length === 0) {
         return {
           content: [
             {
@@ -47,8 +77,8 @@ const getAlbums: tool<{
         };
       }
 
-      if (albums.length === 1) {
-        const album = albums[0];
+      if (validAlbums.length === 1) {
+        const album = validAlbums[0];
         const artists = album.artists.map((a) => a.name).join(', ');
         const releaseDate = album.release_date;
         const totalTracks = album.total_tracks;
@@ -121,14 +151,12 @@ const getAlbumTracks: tool<{
     const { albumId, limit = 20, offset = 0 } = args;
 
     try {
-      const tracks = await handleSpotifyRequest(async (spotifyApi) => {
-        return await spotifyApi.albums.tracks(
-          albumId,
-          undefined,
-          limit as MaxInt<50>,
-          offset,
-        );
-      });
+      const tracks = await spotifyFetch<SpotifyAlbumTracksResponse>(
+        `/albums/${albumId}/tracks`,
+        {
+          params: { limit, offset },
+        },
+      );
 
       if (tracks.items.length === 0) {
         return {
@@ -204,10 +232,12 @@ const saveOrRemoveAlbumForUser: tool<{
     }
 
     try {
-      await handleSpotifyRequest(async (spotifyApi) => {
-        return action === 'save'
-          ? await spotifyApi.currentUser.albums.saveAlbums(albumIds)
-          : await spotifyApi.currentUser.albums.removeSavedAlbums(albumIds);
+      // Convert IDs to Spotify URIs for new /me/library endpoint
+      const uris = albumIds.map((id) => `spotify:album:${id}`);
+
+      await spotifyFetch('/me/library', {
+        method: action === 'save' ? 'PUT' : 'DELETE',
+        body: { uris },
       });
 
       const actionPastTense = action === 'save' ? 'saved' : 'removed';
@@ -262,9 +292,15 @@ const checkUsersSavedAlbums: tool<{
     }
 
     try {
-      const savedStatus = await handleSpotifyRequest(async (spotifyApi) => {
-        return await spotifyApi.currentUser.albums.hasSavedAlbums(albumIds);
-      });
+      // Convert IDs to Spotify URIs for new /me/library/contains endpoint
+      const uris = albumIds.map((id) => `spotify:album:${id}`).join(',');
+
+      const savedStatus = await spotifyFetch<boolean[]>(
+        '/me/library/contains',
+        {
+          params: { uris },
+        },
+      );
 
       const formattedResults = albumIds
         .map((albumId, i) => {

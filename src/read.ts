@@ -337,10 +337,16 @@ const getPlaylistTracks: tool<{
     const { playlistId, limit = 50, offset = 0 } = args;
 
     // Using new /items endpoint instead of deprecated /tracks
+    // Request specific fields to ensure we get track details
     const playlistTracks = await spotifyFetch<SpotifyPlaylistItemsResponse>(
       `/playlists/${playlistId}/items`,
       {
-        params: { limit, offset },
+        params: {
+          limit,
+          offset,
+          fields:
+            'total,items(track(id,name,duration_ms,type,artists(name),album(name)))',
+        },
       },
     );
 
